@@ -1,0 +1,126 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import “@openzeppelin/contracts/token/ERC20/ERC20.sol”;
+import “@openzeppelin/contracts/token/ERC721/ERC721.sol”;
+import “@openzeppelin/contracts/access/Ownable.sol”;
+import “@openzeppelin/contracts/security/ReentrancyGuard.sol”;
+
+/**
+
+- @title DIGZOGameEngine
+- @dev Smart contract for DIGZO token and NFT integration with virtual world
+  */
+  contract DIGZOGameEngine is ERC20, Ownable, ReentrancyGuard {
+  
+  // Token economics
+  uint256 public constant MAX_SUPPLY = 1000000 * 10**18;
+  uint256 public issuedSupply = 18487713694; // Current issued supply from alpha.waxfun
+  
+  // Game mechanics
+  mapping(address => PlayerData) public players;
+  mapping(uint256 => GameAsset) public gameAssets;
+  mapping(address => uint256[]) public playerNFTs;
+  
+  uint256 private nextAssetId = 1;
+  uint256 public rewardPool = 100000 * 10**18; // 100k DIGZO for rewards
+  
+  struct PlayerData {
+  uint256 level;
+  uint256 experience;
+  uint256 tasksCompleted;
+  uint256 lastRewardTime;
+  bool isActive;
+  }
+  
+  struct GameAsset {
+  address owner;
+  string assetType; // “land”, “building”, “item”, “character”
+  string metadata;
+  uint256 value;
+  bool isTradeble;
+  }
+  
+  // Events
+  event PlayerRegistered(address indexed player);
+  event TaskCompleted(address indexed player, string taskType, uint256 reward);
+  event AssetMinted(address indexed player, uint256 indexed assetId, string assetType);
+  event TokensEarned(address indexed player, uint256 amount, string source);
+  
+  constructor() ERC20(“DIGZO”, “DGZ”) {
+  _mint(address(this), MAX_SUPPLY);
+  }
+  
+  /**
+  - @dev Register a new player in the game
+    */
+    function registerPlayer() external {
+    require(!players[msg.sender].isActive, “Player already registered”);
+    
+    players[msg.sender] = PlayerData({
+    level: 1,
+    experience: 0,
+    tasksCompleted: 0,
+    lastRewardTime: block.timestamp,
+    isActive: true
+    });
+    
+    // Welcome bonus
+    uint256 welcomeBonus = 10 * 10**18; // 10 DIGZO
+    _transfer(address(this), msg.sender, welcomeBonus);
+    
+    emit PlayerRegistered(msg.sender);
+    emit TokensEarned(msg.sender, welcomeBonus, “registration_bonus”);
+    }
+  
+  /**
+  - @dev Complete a game task and earn DIGZO tokens
+    */
+    function completeTask(address player, string memory taskType) external onlyOwner nonReentrant {
+    require(players[player].isActive, “Player not registered”);
+    
+    uint256 reward = calculateTaskReward(taskType, players[player].level);
+    require(reward <= rewardPool, “Insufficient reward pool”);
+    
+    // Update player data
+    players[player].tasksCompleted++;
+    players[player].experience += reward / 1e18; // 1 XP per DIGZO
+    players[player].lastRewardTime = block.timestamp;
+    
+    // Level up logic
+    uint256 newLevel = calculateLevel(players[player].experience);
+    if (newLevel > players[player].level) {
+    players[player].level = newLevel;
+    // Level up bonus
+    reward += (10 * 10**18); // 10 DIGZO bonus
+    }
+    
+    // Transfer reward
+    _transfer(address(this), player, reward);
+    rewardPool -= reward;
+    
+    emit TaskCompleted(player, taskType, reward);
+    emit TokensEarned(player, reward, taskType);
+    }
+  
+  /**
+  - @dev Calculate reward based on task type and player level
+    */
+    function calculateTaskReward(string memory taskType, uint256 playerLevel)
+    public
+    pure
+    returns (uint256)
+    {
+    uint256 baseReward;
+    
+    // Base rewards for different task types
+    if (keccak256(bytes(taskType)) == keccak256(“quest_completion”)) {
+    baseReward = 5 * 10**18;
+    } else if (keccak256(bytes(taskType)) == keccak256(“resource_collection”)) {
+    baseReward = 1 * 10**18;
+    } else if (keccak256(bytes(taskType)) == keccak256(“pvp_victory”)) {
+    baseReward = 10 * 10**18;
+    } else if (keccak256(bytes(taskType)) == keccak256(“building_construction”)) {
+    baseReward = 15 * 10**18;
+    } else if (keccak256(bytes(taskType)) == keccak256(“exploration”)) {
+    baseReward = 2 * 10**18;
